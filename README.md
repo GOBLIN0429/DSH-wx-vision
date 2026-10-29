@@ -203,6 +203,38 @@ DSH 自己在跑的时候就是最前面的那个，不检查的话粘贴全进�
 
 ---
 
+## 为什么走像素，而不是读数据库或 hook
+
+微信 4.x 的消息确实落盘：
+
+```
+~/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/*/db_storage/message/
+```
+
+但这些库是 **SQLCipher 加密**的（文件头不是 `SQLite format 3`），密钥常驻微信进程内存、
+不落盘。要拿密钥就得读进程内存，实测结论：
+
+| 尝试 | 结果 |
+|---|---|
+| `task_for_pid` 普通用户 | KERN_FAILURE |
+| `task_for_pid` + sudo | KERN_FAILURE |
+| 授予 Terminal「开发者工具」后 | KERN_FAILURE |
+| `lldb -p <微信pid>`（Apple 官方调试器） | **Not allowed to attach** |
+| 读自己 / pid 1 / 另一个普通 bash 进程 | 前者成功，后两者 KERN_FAILURE |
+
+连 lldb 都 attach 不了，且失败的不只是微信 —— **普通进程之间也互相读不了**。
+说明 macOS 26 上 `task_for_pid` 的限制比「目标是否加固运行时」更严：调用方自身
+需要调试权限，而 Terminal.app 的签名是 `flags=0x0(none)`，不具备该能力。
+
+剩下的只有改微信本体那条路（`wechat-mac-hook`）：
+重签名（破坏加固运行时）→ `DYLD_INSERT_LIBRARIES` 注入 → 进程内 hook 收发消息。
+代价是重签名导致登录态失效、TCC 权限静默失效（截图/麦克风等）、频繁弹窗、
+且项目钉死微信 4.1.11.53。
+
+像素路线虽然慢，但不碰微信本体、没有封号风险、微信更新不会失效。
+
+---
+
 ## 安全
 
 - 不改微信客户端，不注入，不 hook
