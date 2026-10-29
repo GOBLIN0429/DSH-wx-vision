@@ -222,6 +222,7 @@ def click_row(name, rows, rect, conv_left):
     sy = rect[1] + (hit["y"] + 10) // 2
     activate_wechat()
     subprocess.run([str(BIN / "wxtool"), "click", str(sx), str(sy)], capture_output=True)
+    _last_click_at[0] = time.time()      # our own click perturbs the list
     return hit["name"]
 
 
@@ -414,6 +415,22 @@ def handle_open(group, state, harness, session_id, names, conv_left, W, H,
     return ok is True
 
 
+CLICK_SUPPRESS = 3.5   # ignore list events this long after we clicked
+_last_click_at = [0.0]
+_last_sig = [None]
+
+
+def signature(rows):
+    """What the list actually says, for change detection.
+
+    The list hash also moves when WE open a chat: the unread badge clears and
+    the entry jumps to the top. Treating that as "someone sent a message" made
+    the watcher click, which changed the list again, which triggered another
+    click — a loop that kept opening chats with no new traffic at all.
+    """
+    return tuple((e["name"][:24], e["preview"][:24]) for e in rows[:8])
+
+
 SWITCH_FAIL = {}      # group -> (consecutive failures, cooldown-until timestamp)
 SWITCH_COOLDOWN = 90  # seconds to leave a group alone after repeated failures
 SWITCH_GIVE_UP = 3
@@ -580,6 +597,12 @@ def main():
             # named by its preview instead ("[动画表情]"). When the top entry's
             # name matches nothing, open it and let the HEADER title identify it:
             # that text is large and OCR reads it reliably.
+            sig = signature(rows)
+            if sig == _last_sig[0]:
+                log({"stage": "skip", "why": "list content unchanged"})
+                continue
+            _last_sig[0] = sig
+
             top = rows[0]["name"]
             match = next((g for g in groups if matches(top, g)), None)
             if match is None:
