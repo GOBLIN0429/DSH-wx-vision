@@ -126,7 +126,11 @@ def chat_rows(conv_left):
 
     clusters = []
     for c in cand:
-        if clusters and c["y"] - clusters[-1][-1]["y"] < 100:
+        # One entry is ~160px tall: the name and its preview sit ~55px apart,
+        # neighbouring entries ~105px apart. 100 merged a neighbour's name into
+        # the previous entry's preview, which made a whole chat disappear from
+        # the list ("互帮互助" vanished into 张甲鱼's row).
+        if clusters and c["y"] - clusters[-1][-1]["y"] < 75:
             clusters[-1].append(c)
         else:
             clusters.append([c])
@@ -207,6 +211,27 @@ def activate_wechat():
             time.sleep(0.35)
     except Exception:
         pass
+
+
+def wait_for_title(timeout=6.0):
+    """Poll until the conversation header has text, then return it.
+
+    A fixed sleep is wrong here: opening a chat with dozens of unread messages
+    keeps the pane blank for a second or two, so a 1.1s wait read an empty title
+    and reported a switch failure — then burned its retry the same way and hit
+    the cooldown. F42 with 61 unread made every attempt look broken.
+    """
+    end = time.time() + timeout
+    title, conv_left, size = "", None, None
+    while time.time() < end:
+        f, conv_left, rect = frame()
+        if f is not None:
+            size = f
+            title = header_title(conv_left)
+            if title.strip():
+                return title, conv_left, size
+        time.sleep(0.4)
+    return title, conv_left, size
 
 
 def click_row(name, rows, rect, conv_left):
@@ -645,8 +670,7 @@ def main():
                     target_rows = chat_rows(conv_left)
                 if click_row(match, target_rows, rect, conv_left) is None:
                     break
-                time.sleep(1.1)
-                f, conv_left, rect = frame()
+                _t, conv_left, f = wait_for_title()
                 if f is None:
                     break
                 W, H = f
