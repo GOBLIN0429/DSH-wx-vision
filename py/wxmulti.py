@@ -327,7 +327,7 @@ def has_owed(group, state, names, conv_left, W, H, require_mention=True):
 
 
 def handle_open(group, state, harness, session_id, names, conv_left, W, H,
-                require_mention=True):
+                require_mention=True, groups_all=None):
     """Answer any mention in the ALREADY OPEN conversation that is still owed.
 
     The trigger for answering is positional, not a pre-built baseline: a mention
@@ -336,6 +336,15 @@ def handle_open(group, state, harness, session_id, names, conv_left, W, H,
     answered — which looked like the bot hopping between chats and leaving
     without saying anything.
     """
+    groups_all = groups_all or {group}
+    # Hard identity check: everything below reads whatever pane is on screen, so
+    # if the window is not actually showing `group` the reply would be composed
+    # from the wrong conversation — and posted into it.
+    on_screen = current_group(conv_left, groups_all) or header_title(conv_left)[:24]
+    if not on_screen or not (matches(on_screen, group) or group.lower() in on_screen.lower()):
+        log({"group": group, "stage": "abort-wrong-window", "on_screen": on_screen[:24]})
+        return False
+
     seen = state.setdefault(group, set())
     rows = read_conversation(conv_left, W, H)
     if not rows:
