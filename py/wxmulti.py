@@ -144,6 +144,53 @@ def chat_rows(conv_left):
     return out
 
 
+def unread_slots(conv_left, img_path):
+    """y centres of chat entries that carry an unread badge.
+
+    Chat names are not reliable: a one-letter name like "Z" is not detected by
+    Vision OCR at all, so an entry can only be identified after opening it. The
+    badge, however, is a small saturated red blob at the avatar's top-right and
+    is easy to find — it says "this entry has news" without saying which.
+    """
+    from PIL import Image
+    im = Image.open(img_path).convert("RGB")
+    W, H = im.size
+    px = im.load()
+    x0, x1 = int(conv_left * 0.34), int(conv_left * 0.48)
+    y0, y1 = int(H * 0.06), int(H * 0.85)
+    reds = set()
+    for y in range(y0, y1, 2):
+        for x in range(x0, x1, 2):
+            r, g, b = px[x, y]
+            if r > 150 and g < 100 and b < 100 and r - max(g, b) > 55:
+                reds.add((x, y))
+    seen = set()
+    slots = []
+    for pt in sorted(reds):
+        if pt in seen:
+            continue
+        stack = [pt]
+        seen.add(pt)
+        cells = []
+        while stack:
+            cx, cy = stack.pop()
+            cells.append((cx, cy))
+            for dx in (-2, 0, 2):
+                for dy in (-2, 0, 2):
+                    q = (cx + dx, cy + dy)
+                    if q in reds and q not in seen:
+                        seen.add(q)
+                        stack.append(q)
+        if len(cells) < 2:
+            continue
+        ys = [c[1] for c in cells]
+        xs = [c[0] for c in cells]
+        # badges are small; avatars are large and would fail this size window
+        if 8 <= (max(xs) - min(xs)) <= 60 and 8 <= (max(ys) - min(ys)) <= 50:
+            slots.append((min(ys) + max(ys)) // 2)
+    return slots
+
+
 def click_row(name, rows, rect, conv_left):
     """Click a chat row, using its name's y as the hit point."""
     hit = None
@@ -432,14 +479,31 @@ def main():
             # top of the list, so the first entry IS the one to look at. Reading
             # the "[有人@我]" preview instead was tried and abandoned: OCR turns
             # it into noise like "$（0 -°）" and it can never be matched.
+            # A short chat name is invisible to Vision OCR — "Z" produced no
+            # token at all, not even a low-confidence one — so an entry can be
+            # named by its preview instead ("[动画表情]"). When the top entry's
+            # name matches nothing, open it and let the HEADER title identify it:
+            # that text is large and OCR reads it reliably.
             top = rows[0]["name"]
             match = next((g for g in groups if matches(top, g)), None)
             if match is None:
-                log({"stage": "skip", "why": "top not watched", "top": top[:30]})
-                continue
-            if match == here and not has_owed(match, state, names, conv_left, W, H,
-                                              match not in all_chats):
-                log({"stage": "skip", "why": "already open, nothing owed", "group": match})
+                sx = rect[0] + int(conv_left * 0.55) // 2
+                sy = rect[1] + (rows[0]["y"] + 10) // 2
+                subprocess.run([str(BIN / "wxtool"), "click", str(sx), str(sy)],
+                               capture_output=True)
+                time.sleep(1.1)
+                f, conv_left, rect = frame()
+                if f is None:
+                    continue
+                W, H = f
+                opened = current_group(conv_left, groups)
+                if opened is None:
+                    log({"stage": "skip", "why": "top unnamed and not watched",
+                         "top": top[:24], "title": header_title(conv_left)[:24]})
+                    continue
+                log({"stage": "opened-by-title", "group": opened, "top": top[:20]})
+                handle_open(opened, state, harness, args.session, names,
+                            conv_left, W, H, opened not in all_chats)
                 continue
             # The list can reorder between the OCR snapshot and the click, so a
             # stale y lands on a neighbour (WeChat Team, typically) and the bot
