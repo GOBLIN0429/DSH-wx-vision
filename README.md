@@ -90,11 +90,31 @@ wxstop.sh   停止（取消会话 → 杀进程 → 校验干净）
 在 DSH 里建一个专门的工作区（例如 `wechat-chat/`），把 `persona/AGENTS.md` 拷进去。
 人格就是那个文件 —— 它决定「对谁热情、对谁生疏、什么能办、什么要请示」。
 
+### 配置监听哪些群
+
+群名是中文，**不要通过命令行或环境变量传** —— 经 shell 中转时字节会被破坏
+（实测：脚本里读回来是正确的 UTF-8，传到 argv 却变成了 `20`）。
+写进仓库根目录的 `groups.txt`，一行一个，Python 直接按 UTF-8 读：
+
+```bash
+cp groups.example.txt groups.txt
+$EDITOR groups.txt      # 一行一个群名，可只写前缀
+```
+
+`groups.txt` 各人不同，已排除在版本控制外。
+
 ### 启动
 
 ```bash
 ./wxstart.sh
 ```
+
+环境变量：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `WX_SESSION` | 会话 ID | 注入目标会话 |
+| `WX_MODE` | `multi` | `multi` 多群仲裁 / `group` 只盯当前打开的群 |
 
 它会：清理上次残留 → 把微信窗口固定到 `(820,60) 800×889` → 连会话 → 起检测器。
 设置会话 ID 用环境变量 `WX_SESSION`。
