@@ -77,9 +77,14 @@ def chat_rows(conv_left):
     raw = wxsend.ocr_tokens(Path("/tmp/list.png"))
     items = [t for t in raw if t["c"] >= 0.3 and t["t"].strip() not in UI_NOISE]
     out = []
+    im_h = im.height
     for r in wxread.group_rows(items):
         text = r["text"].strip()
         if r["x"] < conv_left * 0.33 or not text:
+            continue
+        # The search field sits above the first chat entry and is not a
+        # conversation; including it makes the "top row" useless.
+        if r["y"] < im_h * 0.075 or text in ("搜索", "Search"):
             continue
         out.append((text, r["y"], r["x"]))
     return out
