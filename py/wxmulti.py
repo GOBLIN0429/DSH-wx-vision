@@ -16,6 +16,7 @@ earlier single-group bridge stopped seeing anything.
 """
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -420,6 +421,13 @@ def main():
     # writes /tmp/wx_send.png. Sharing that path made this process open a file
     # another process had just replaced, crashing the watcher mid-sweep.
     wxsend.CAP = Path("/tmp/wxmulti_cap.png")
+    # Register the session we inject into. wxstop.sh reads this file; without it
+    # the stop script cancels whatever a previous (stale) run left behind.
+    try:
+        Path("/tmp/wxbridge.state").write_text(
+            json.dumps({"session_id": args.session, "pid": os.getpid()}))
+    except Exception:
+        pass
     wb.ensure_geometry()
 
     det = subprocess.Popen([str(BIN / "wxwatch")], stdout=subprocess.PIPE,
