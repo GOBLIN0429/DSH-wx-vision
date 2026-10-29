@@ -70,40 +70,61 @@ def frame():
 
 
 def chat_rows(conv_left):
-    """Chat-list entries as (name, y, x) in image pixels."""
+    """Chat-list entries as dicts: name, y, x, preview.
+
+    A chat entry is two lines — the name with a timestamp, then the message
+    preview. OCR emits them as separate rows, so cluster rows that sit within
+    100px of each other: the cluster's first line is the name, the rest is the
+    preview. The preview is what carries WeChat's "[有人@我]" flag.
+    """
     from PIL import Image
     im = Image.open(wxsend.CAP)
-    im.crop((0, 0, conv_left, im.height)).save("/tmp/list.png")
+    im_h = im.height
+    im.crop((0, 0, conv_left, im_h)).save("/tmp/list.png")
     raw = wxsend.ocr_tokens(Path("/tmp/list.png"))
     items = [t for t in raw if t["c"] >= 0.3 and t["t"].strip() not in UI_NOISE]
-    out = []
-    im_h = im.height
+
+    cand = []
     for r in wxread.group_rows(items):
         text = r["text"].strip()
         if r["x"] < conv_left * 0.33 or not text:
             continue
-        # The search field sits above the first chat entry and is not a
-        # conversation; including it makes the "top row" useless.
         if r["y"] < im_h * 0.075 or text in ("搜索", "Search"):
             continue
-        out.append((text, r["y"], r["x"]))
+        if text.isdigit() or (text.endswith("+") and text[:-1].isdigit()):
+            continue                       # unread badge, not a row
+        cand.append({"text": text, "y": r["y"], "x": r["x"]})
+    cand.sort(key=lambda d: d["y"])
+
+    clusters = []
+    for c in cand:
+        if clusters and c["y"] - clusters[-1][-1]["y"] < 100:
+            clusters[-1].append(c)
+        else:
+            clusters.append([c])
+
+    out = []
+    for cl in clusters:
+        head = cl[0]
+        preview = " ".join(d["text"] for d in cl[1:])
+        out.append({"name": head["text"], "y": head["y"], "x": head["x"],
+                    "preview": preview})
     return out
 
 
 def click_row(name, rows, rect, conv_left):
     """Click a chat row, using its name's y as the hit point."""
     hit = None
-    for text, y, x in rows:
-        if name in text or text.startswith(name):
-            hit = (text, y, x)
+    for e in rows:
+        if name in e["name"] or e["name"].startswith(name):
+            hit = e
             break
     if hit is None:
         return None
-    _, y, x = hit
-    sx = rect[0] + max(x, int(conv_left * 0.55)) // 2
-    sy = rect[1] + (y + 10) // 2
+    sx = rect[0] + max(hit["x"], int(conv_left * 0.55)) // 2
+    sy = rect[1] + (hit["y"] + 10) // 2
     subprocess.run([str(BIN / "wxtool"), "click", str(sx), str(sy)], capture_output=True)
-    return hit[0]
+    return hit["name"]
 
 
 def header_title(conv_left):
@@ -356,7 +377,11 @@ def main():
             if not rows:
                 log({"stage": "skip", "why": "empty list"})
                 continue
-            top = rows[0][0]
+            # WeChat floats the conversation that just received a message to the
+            # top of the list, so the first entry IS the one to look at. Reading
+            # the "[有人@我]" preview instead was tried and abandoned: OCR turns
+            # it into noise like "$（0 -°）" and it can never be matched.
+            top = rows[0]["name"]
             match = next((g for g in groups if g in top or top.startswith(g)), None)
             if match is None:
                 log({"stage": "skip", "why": "top not watched", "top": top[:30]})
