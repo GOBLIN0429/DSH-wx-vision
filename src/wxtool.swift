@@ -50,6 +50,23 @@ func key(_ code: CGKeyCode, flags: CGEventFlags = []) {
 let a = CommandLine.arguments
 guard a.count >= 2 else { print("usage: wxtool click X Y | paste | enter | type CODE"); exit(1) }
 switch a[1] {
+case "pos":
+    // Where the cursor actually is, in the same space CGEvent accepts.
+    if let e = CGEvent(source: nil) {
+        print("cursor=\(e.location.x),\(e.location.y)")
+    }
+case "move":
+    if a.count >= 4, let x = Double(a[2]), let y = Double(a[3]) {
+        let p = CGPoint(x: x, y: y)
+        let m = CGEvent(mouseEventSource: src, mouseType: .mouseMoved,
+                        mouseCursorPosition: p, mouseButton: .left)
+        m?.flags = []
+        m?.post(tap: .cghidEventTap)
+        usleep(200_000)
+        if let e = CGEvent(source: nil) {
+            print("requested=\(x),\(y) actual=\(e.location.x),\(e.location.y)")
+        }
+    }
 case "release":
     releaseModifiers(); print("released")
 case "click":
