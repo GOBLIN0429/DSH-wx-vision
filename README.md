@@ -98,8 +98,19 @@ wxstop.sh   停止（取消会话 → 杀进程 → 校验干净）
 
 ```bash
 cp groups.example.txt groups.txt
-$EDITOR groups.txt      # 一行一个群名，可只写前缀
+$EDITOR groups.txt
 ```
+
+一行一个聊天，可只写名字前缀。默认**只在被 @ 时回复**；行尾加 `|all`
+表示这是私聊、**每条都要回**：
+
+```
+F42              # 群聊：只有 @ 我时才回
+互帮互助          # 群聊
+z|all            # 私聊：每一条都回
+```
+
+群名匹配不区分大小写（列表里可能显示成 `Z`）。
 
 `groups.txt` 各人不同，已排除在版本控制外。
 

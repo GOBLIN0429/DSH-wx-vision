@@ -46,6 +46,33 @@ def norm(t):
     return wb.norm(t)
 
 
+def matches(name, group):
+    """Does a chat-list entry belong to `group`? Case-insensitive: the list may
+    render a one-letter name as "Z" while the config says "z"."""
+    n, g = name.strip().lower(), group.strip().lower()
+    return g in n or n.startswith(g)
+
+
+def parse_groups(raw_lines):
+    """Parse groups.txt into [(name, reply_to_all)].
+
+    A line is either a chat name, or `name|all`. `all` means an open
+    conversation — a private chat — where every message deserves an answer
+    rather than only those that mention us.
+    """
+    out = []
+    for line in raw_lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "|" in line:
+            name, _, mode = line.partition("|")
+            out.append((name.strip(), mode.strip().lower() == "all"))
+        else:
+            out.append((line, False))
+    return out
+
+
 def load_state():
     try:
         return {k: set(v) for k, v in json.loads(STATE.read_text()).items()}
@@ -104,11 +131,16 @@ def chat_rows(conv_left):
             clusters.append([c])
 
     out = []
+    name_edge = conv_left * 0.75      # right of this is the timestamp column
     for cl in clusters:
-        head = cl[0]
-        preview = " ".join(d["text"] for d in cl[1:])
+        # The timestamp shares the name's line and OCR may emit it first, which
+        # made an entry show up named "15:47" with the real name pushed into the
+        # preview. Split by column instead of by reading order.
+        name_parts = [d for d in cl if d["x"] < name_edge]
+        head = name_parts[0] if name_parts else cl[0]
+        rest = [d for d in cl if d is not head]
         out.append({"name": head["text"], "y": head["y"], "x": head["x"],
-                    "preview": preview})
+                    "preview": " ".join(d["text"] for d in rest)})
     return out
 
 
@@ -116,7 +148,7 @@ def click_row(name, rows, rect, conv_left):
     """Click a chat row, using its name's y as the hit point."""
     hit = None
     for e in rows:
-        if name in e["name"] or e["name"].startswith(name):
+        if matches(e["name"], name):
             hit = e
             break
     if hit is None:
@@ -196,12 +228,12 @@ def current_group(conv_left, groups):
     """Which watched group is currently displayed, from the header title."""
     title = header_title(conv_left)
     for g in groups:
-        if g in title:
+        if matches(title, g):
             return g
     return None
 
 
-def has_owed(group, state, names, conv_left, W, H):
+def has_owed(group, state, names, conv_left, W, H, require_mention=True):
     """Cheap check: does the open conversation contain a mention we owe?"""
     rows = read_conversation(conv_left, W, H)
     if not rows:
@@ -218,7 +250,7 @@ def has_owed(group, state, names, conv_left, W, H):
         if r.get("kind") != "incoming" or answered[i]:
             continue
         text = r["text"].strip()
-        if not any(n.lower() in text.lower() for n in names):
+        if require_mention and not any(n.lower() in text.lower() for n in names):
             continue
         if wb.fuzzy_in(text, seen) or wb.fuzzy_in(text, mine):
             continue
@@ -226,7 +258,8 @@ def has_owed(group, state, names, conv_left, W, H):
     return False
 
 
-def handle_open(group, state, harness, session_id, names, conv_left, W, H):
+def handle_open(group, state, harness, session_id, names, conv_left, W, H,
+                require_mention=True):
     """Answer any mention in the ALREADY OPEN conversation that is still owed.
 
     The trigger for answering is positional, not a pre-built baseline: a mention
@@ -258,7 +291,9 @@ def handle_open(group, state, harness, session_id, names, conv_left, W, H):
         if r.get("kind") != "incoming":
             continue
         text = r["text"].strip()
-        if not text or not any(n.lower() in text.lower() for n in names):
+        if not text:
+            continue
+        if require_mention and not any(n.lower() in text.lower() for n in names):
             continue
         if answered_below[i]:
             continue                      # we already replied below it
@@ -269,6 +304,9 @@ def handle_open(group, state, harness, session_id, names, conv_left, W, H):
     if not targets:
         log({"group": group, "stage": "no-owed-mention"})
         return
+    # A private chat can accumulate several unanswered lines; answer the latest
+    # ones instead of replying to an entire backlog in one breath.
+    targets = targets[-2:]
 
     imgs = wb.detect_images(rows, str(wxsend.CAP), W, H, conv_left)
     paths = []
@@ -306,15 +344,18 @@ def main():
     ap.add_argument("--settle", type=float, default=0.8)
     args = ap.parse_args()
 
+    all_chats = set()
     groups = [g.strip() for g in args.groups.split(",") if g.strip()]
     if not groups:
-        # Group names are Chinese, and passing them through a shell variable
+        # Chat names are Chinese, and passing them through a shell variable
         # mangles the bytes (observed: a variable that reads back correctly is
         # delivered to argv as "20"). Reading a UTF-8 file sidesteps the shell.
         cfg = HERE.parent / "groups.txt"
         if cfg.exists():
-            groups = [ln.strip() for ln in cfg.read_text(encoding="utf-8").splitlines()
-                      if ln.strip() and not ln.strip().startswith("#")]
+            parsed = parse_groups(cfg.read_text(encoding="utf-8").splitlines())
+            groups = [g for g, _ in parsed]
+            all_chats = {g for g, every in parsed if every}
+            log({"stage": "config", "chats": parsed})
     if not groups:
         print("[multi] no groups configured (groups.txt)", flush=True)
         return 2
@@ -353,7 +394,8 @@ def main():
             if src == "frame":
                 if here is None:
                     continue
-                handle_open(here, state, harness, args.session, names, conv_left, W, H)
+                handle_open(here, state, harness, args.session, names, conv_left, W, H,
+                            here not in all_chats)
                 continue
 
             # ---- list changed: another conversation moved. Finish the current
@@ -362,14 +404,17 @@ def main():
             if src != "list":
                 continue
             time.sleep(args.settle)
-            if here is not None and has_owed(here, state, names, conv_left, W, H):
+            here_all = here in all_chats
+            if here is not None and has_owed(here, state, names, conv_left, W, H,
+                                             not here_all):
                 log({"stage": "current-first", "group": here})
-                handle_open(here, state, harness, args.session, names, conv_left, W, H)
+                handle_open(here, state, harness, args.session, names, conv_left, W, H,
+                            not here_all)
                 f, conv_left, rect = frame()
                 if f is None:
                     continue
                 W, H = f
-                if has_owed(here, state, names, conv_left, W, H):
+                if has_owed(here, state, names, conv_left, W, H, not here_all):
                     log({"stage": "still-owed", "group": here})
                     continue
 
@@ -382,11 +427,12 @@ def main():
             # the "[有人@我]" preview instead was tried and abandoned: OCR turns
             # it into noise like "$（0 -°）" and it can never be matched.
             top = rows[0]["name"]
-            match = next((g for g in groups if g in top or top.startswith(g)), None)
+            match = next((g for g in groups if matches(top, g)), None)
             if match is None:
                 log({"stage": "skip", "why": "top not watched", "top": top[:30]})
                 continue
-            if match == here and not has_owed(match, state, names, conv_left, W, H):
+            if match == here and not has_owed(match, state, names, conv_left, W, H,
+                                              match not in all_chats):
                 log({"stage": "skip", "why": "already open, nothing owed", "group": match})
                 continue
             # The list can reorder between the OCR snapshot and the click, so a
@@ -421,7 +467,8 @@ def main():
                 log({"stage": "skip", "why": "switch failed after retry",
                      "want": match})
                 continue
-            handle_open(opened, state, harness, args.session, names, conv_left, W, H)
+            handle_open(opened, state, harness, args.session, names, conv_left, W, H,
+                        opened not in all_chats)
     finally:
         det.terminate()
 
