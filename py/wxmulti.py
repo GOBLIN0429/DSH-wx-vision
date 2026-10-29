@@ -192,6 +192,23 @@ def unread_slots(conv_left, img_path):
     return slots
 
 
+def activate_wechat():
+    """Bring WeChat to the front before any synthetic click.
+
+    Clicks posted while another app is frontmost go to that app — usually DSH
+    itself — so the chat never opens and the helper reads a stale pane. This was
+    the cause of "clicked but nothing happened" reports.
+    """
+    try:
+        pid = subprocess.run([str(BIN / "wpid")], capture_output=True,
+                             text=True, timeout=5).stdout.strip()
+        if pid.isdigit():
+            subprocess.run([str(BIN / "activate"), pid], capture_output=True, timeout=5)
+            time.sleep(0.35)
+    except Exception:
+        pass
+
+
 def click_row(name, rows, rect, conv_left):
     """Click a chat row, using its name's y as the hit point."""
     hit = None
@@ -203,6 +220,7 @@ def click_row(name, rows, rect, conv_left):
         return None
     sx = rect[0] + max(hit["x"], int(conv_left * 0.55)) // 2
     sy = rect[1] + (hit["y"] + 10) // 2
+    activate_wechat()
     subprocess.run([str(BIN / "wxtool"), "click", str(sx), str(sy)], capture_output=True)
     return hit["name"]
 
@@ -392,6 +410,8 @@ def main():
     ap.add_argument("--session", required=True)
     ap.add_argument("--names", default="GOBLIN,goblin")
     ap.add_argument("--settle", type=float, default=0.8)
+    ap.add_argument("--sweep", action="store_true",
+                    help="visit every watched chat once, answer what is owed, then exit")
     args = ap.parse_args()
 
     all_chats = set()
@@ -497,6 +517,7 @@ def main():
             if match is None:
                 sx = rect[0] + int(conv_left * 0.55) // 2
                 sy = rect[1] + (rows[0]["y"] + 10) // 2
+                activate_wechat()
                 subprocess.run([str(BIN / "wxtool"), "click", str(sx), str(sy)],
                                capture_output=True)
                 time.sleep(1.1)

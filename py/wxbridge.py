@@ -116,11 +116,17 @@ class Harness:
         }, timeout=60)
 
 
-def fuzzy_in(text, keys, cutoff=0.85):
+def fuzzy_in(text, keys, cutoff=None):
     """OCR re-reads the same bubble slightly differently (drops the @, swaps
     几/儿). Exact keys miss those, so compare fuzzily as well — otherwise an
     already-answered message gets injected again and the group sees a repeat."""
     n = norm(text)
+    if cutoff is None:
+        # Short messages need a much tighter test. "我叫什么" and "那我叫什么"
+        # score 0.957 against each other, so the loose cutoff silently swallowed
+        # a genuine new question as "already answered". Two characters of
+        # difference in a short line matters; in a long one it is OCR jitter.
+        cutoff = 0.85 if len(n) >= 16 else 0.98
     if n in keys:
         return True
     for k in keys:
