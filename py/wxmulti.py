@@ -371,7 +371,7 @@ def handle_open(group, state, harness, session_id, names, conv_left, W, H,
 
     if not targets:
         log({"group": group, "stage": "no-owed-mention"})
-        return
+        return False
     # A private chat can accumulate several unanswered lines; answer the latest
     # ones instead of replying to an entire backlog in one breath.
     targets = targets[-2:]
@@ -402,6 +402,7 @@ def handle_open(group, state, harness, session_id, names, conv_left, W, H,
         save_state(state)
     log({"group": group, "stage": "injected", "by": targets[-1][:50],
          "images": len(paths), "ok": ok})
+    return ok is True
 
 
 SWITCH_FAIL = {}      # group -> (consecutive failures, cooldown-until timestamp)
@@ -428,6 +429,36 @@ def note_switch(group, ok):
     if fails >= SWITCH_GIVE_UP:
         log({"stage": "switch-cooldown", "group": group, "fails": fails,
              "seconds": SWITCH_COOLDOWN})
+
+
+REPLY_TIMEOUT = 120
+
+
+def wait_until_idle(harness, session_id, timeout=REPLY_TIMEOUT):
+    """Block until the injected turn has been answered.
+
+    The watcher and the sender used to race: a reply was injected and the
+    watcher immediately switched to another chat, so wxsend.py either pasted
+    into the wrong conversation or found the pane already changed. Waiting for
+    the session to fall idle keeps the window on the chat that owns the
+    pending reply — "send first, switch later".
+    """
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            for it in harness.sessions():
+                if it.get("sessionId") != session_id:
+                    continue
+                vals = (it.get("projections") or {}).get("values") or {}
+                inbox = vals.get("inbox") or {}
+                pending = len(inbox.get("next-turn") or []) + len(inbox.get("next-step") or [])
+                if not it.get("running") and pending == 0:
+                    return True
+        except Exception:
+            pass
+        time.sleep(1.5)
+    log({"stage": "reply-timeout", "session": session_id[:16]})
+    return False
 
 
 def main():
@@ -501,8 +532,9 @@ def main():
             if src == "frame":
                 if here is None:
                     continue
-                handle_open(here, state, harness, args.session, names, conv_left, W, H,
-                            here not in all_chats)
+                if handle_open(here, state, harness, args.session, names,
+                               conv_left, W, H, here not in all_chats):
+                    wait_until_idle(harness, args.session)
                 continue
 
             # ---- list changed: another conversation moved. Finish the current
@@ -515,8 +547,9 @@ def main():
             if here is not None and has_owed(here, state, names, conv_left, W, H,
                                              not here_all):
                 log({"stage": "current-first", "group": here})
-                handle_open(here, state, harness, args.session, names, conv_left, W, H,
-                            not here_all)
+                if handle_open(here, state, harness, args.session, names,
+                               conv_left, W, H, not here_all):
+                    wait_until_idle(harness, args.session)
                 f, conv_left, rect = frame()
                 if f is None:
                     continue
@@ -557,8 +590,9 @@ def main():
                          "top": top[:24], "title": header_title(conv_left)[:24]})
                     continue
                 log({"stage": "opened-by-title", "group": opened, "top": top[:20]})
-                handle_open(opened, state, harness, args.session, names,
-                            conv_left, W, H, opened not in all_chats)
+                if handle_open(opened, state, harness, args.session, names,
+                               conv_left, W, H, opened not in all_chats):
+                    wait_until_idle(harness, args.session)
                 continue
             # The list can reorder between the OCR snapshot and the click, so a
             # stale y lands on a neighbour (WeChat Team, typically) and the bot
@@ -597,8 +631,9 @@ def main():
                      "want": match})
                 continue
             note_switch(match, True)
-            handle_open(opened, state, harness, args.session, names, conv_left, W, H,
-                        opened not in all_chats)
+            if handle_open(opened, state, harness, args.session, names,
+                           conv_left, W, H, opened not in all_chats):
+                wait_until_idle(harness, args.session)
     finally:
         det.terminate()
 
