@@ -63,7 +63,7 @@
 **余额 / 还剩多少钱 / 用了多少**
 
 ```
-python3 "/Users/goblin/Documents/deepseek-harness/default-workspace/.rpabuild/wxbalance.py"
+python3 "/Users/goblin/Documents/deepseek-harness/default-workspace/wechat-dsh-bridge/py/wxbalance.py"
 ```
 
 会输出类似 `¥3.52（充值 3.52，赠送 0.00）`。

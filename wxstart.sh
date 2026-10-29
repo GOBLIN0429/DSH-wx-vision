@@ -8,7 +8,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${PYTHON:-python3}"
 BIN="$HERE/bin"
 PYD="$HERE/py"
-SESSION="${WX_SESSION:-session-9a230587-d0fd-405d-a839-6321a6637fc7}"
+SESSION="${WX_SESSION:-session-f528633e-7047-4cbd-ad4e-fd3c773ecb1b}"
+MODE="${WX_MODE:-multi}"
 LOG="/tmp/wxbridge.log"
 TIMING="/tmp/wxbridge_timing.log"
 STATE="/tmp/wxbridge.state"
@@ -43,17 +44,26 @@ fi
 say ""
 say "=== 启动桥 ==="
 : > "$TIMING"
-nohup "$PY" "$PYD/wxbridge.py" --session "$SESSION" >"$LOG" 2>&1 &
+if [[ "$MODE" == "multi" ]]; then
+  nohup "$PY" "$PYD/wxmulti.py" --session "$SESSION" >"$LOG" 2>&1 &
+else
+  nohup "$PY" "$PYD/wxbridge.py" --session "$SESSION" >"$LOG" 2>&1 &
+fi
 BPID=$!
 say "  pid=$BPID  日志=$LOG"
 
 # Readiness means the detector is up, not just that the process exists: the
 # bridge scans a baseline frame first, which can take several seconds on a busy
 # conversation. Checking too early reports a false failure.
+# Readiness differs by mode: the single-group bridge logs "baseline" after its
+# first scan, the multi-group watcher logs "watching" once its detector is up.
+READY_SENTINEL="baseline"
+[[ "$MODE" == "multi" ]] && READY_SENTINEL="watching"
+
 READY=0
-for _ in $(seq 1 80); do
+for _ in $(seq 1 120); do
   if ! kill -0 "$BPID" 2>/dev/null; then break; fi
-  if grep -q "baseline" "$LOG" 2>/dev/null && pgrep -f "wxwatch" >/dev/null 2>&1; then
+  if grep -q "$READY_SENTINEL" "$LOG" 2>/dev/null && pgrep -f "wxwatch" >/dev/null 2>&1; then
     READY=1
     break
   fi
@@ -75,8 +85,10 @@ fi
 say "  ✓ 已启动"
 say ""
 say "=== 运行状态 ==="
-say "  桥     : $(pgrep -f 'wxbridge.py' | tr '\n' ' ')"
+say "  进程     : $(pgrep -f 'wxbridge.py|wxmulti.py' | tr '\n' ' ')  (${MODE})"
 say "  检测器 : $(pgrep -f 'wxwatch' | tr '\n' ' ')"
 say "  会话   : $SESSION"
+say "  模式   : $MODE"
+say "  群列表 : $(tr '\n' ',' < "$HERE/groups.txt" 2>/dev/null)"
 say ""
 say "停止：$HERE/wxstop.sh"

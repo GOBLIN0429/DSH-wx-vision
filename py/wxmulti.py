@@ -274,13 +274,24 @@ def handle_open(group, state, harness, session_id, names, conv_left, W, H):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--groups", default="F42,互帮互助")
+    ap.add_argument("--groups", default="")
     ap.add_argument("--session", required=True)
     ap.add_argument("--names", default="GOBLIN,goblin")
     ap.add_argument("--settle", type=float, default=0.8)
     args = ap.parse_args()
 
     groups = [g.strip() for g in args.groups.split(",") if g.strip()]
+    if not groups:
+        # Group names are Chinese, and passing them through a shell variable
+        # mangles the bytes (observed: a variable that reads back correctly is
+        # delivered to argv as "20"). Reading a UTF-8 file sidesteps the shell.
+        cfg = HERE.parent / "groups.txt"
+        if cfg.exists():
+            groups = [ln.strip() for ln in cfg.read_text(encoding="utf-8").splitlines()
+                      if ln.strip() and not ln.strip().startswith("#")]
+    if not groups:
+        print("[multi] no groups configured (groups.txt)", flush=True)
+        return 2
     names = [n.strip() for n in args.names.split(",") if n.strip()]
     state = load_state()
 

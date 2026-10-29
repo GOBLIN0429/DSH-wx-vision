@@ -13,3 +13,6 @@ __pycache__/
 *.state
 *.log
 state.json
+
+# 本地群配置（各人不同，不入库）
+groups.txt

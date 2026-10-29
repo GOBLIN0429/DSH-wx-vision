@@ -35,7 +35,7 @@ fi
 
 say ""
 say "=== 2. 终止桥与检测器 ==="
-for pat in "wxbridge.py" "wxwatch" "wxbot.py"; do
+for pat in "wxbridge.py" "wxmulti.py" "wxwatch" "wxbot.py"; do
   pids="$(pgrep -f "$pat" 2>/dev/null || true)"
   if [[ -n "$pids" ]]; then
     say "  停止 $pat: $pids"
@@ -48,11 +48,11 @@ done
 
 # Give them a moment to exit on their own before forcing.
 for _ in $(seq 1 10); do
-  if ! pgrep -f "wxbridge.py|wxwatch|wxbot.py" >/dev/null 2>&1; then break; fi
+  if ! pgrep -f "wxbridge.py|wxmulti.py|wxwatch|wxbot.py" >/dev/null 2>&1; then break; fi
   sleep 0.3
 done
 
-for pat in "wxbridge.py" "wxwatch" "wxbot.py"; do
+for pat in "wxbridge.py" "wxmulti.py" "wxwatch" "wxbot.py"; do
   pids="$(pgrep -f "$pat" 2>/dev/null || true)"
   if [[ -n "$pids" ]]; then
     say "  强制结束 $pat: $pids"
@@ -63,10 +63,10 @@ done
 
 say ""
 say "=== 3. 校验：进程 ==="
-LEFT="$(pgrep -f "wxbridge.py|wxwatch|wxbot.py|wxsend.py|wxtool" 2>/dev/null || true)"
+LEFT="$(pgrep -f "wxbridge.py|wxmulti.py|wxwatch|wxbot.py|wxsend.py|wxtool" 2>/dev/null || true)"
 if [[ -n "$LEFT" ]]; then
   say "  ✗ 仍有残留进程："
-  pgrep -fl "wxbridge.py|wxwatch|wxbot.py|wxsend.py|wxtool" 2>/dev/null | sed 's/^/    /'
+  pgrep -fl "wxbridge.py|wxmulti.py|wxwatch|wxbot.py|wxsend.py|wxtool" 2>/dev/null | sed 's/^/    /'
   FAIL=1
 else
   say "  ✓ 无残留进程"
