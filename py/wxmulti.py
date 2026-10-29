@@ -389,17 +389,37 @@ def main():
             if match == here and not has_owed(match, state, names, conv_left, W, H):
                 log({"stage": "skip", "why": "already open, nothing owed", "group": match})
                 continue
-            if click_row(match, rows, rect, conv_left) is None:
-                continue
-            time.sleep(1.1)
-            f, conv_left, rect = frame()
-            if f is None:
-                continue
-            W, H = f
-            opened = current_group(conv_left, groups)
+            # The list can reorder between the OCR snapshot and the click, so a
+            # stale y lands on a neighbour (WeChat Team, typically) and the bot
+            # appears to hop around. Verify the title and retry once with fresh
+            # coordinates instead of trusting the first click.
+            opened = None
+            for attempt in range(2):
+                if attempt == 0:
+                    target_rows = rows
+                else:
+                    f, conv_left, rect = frame()
+                    if f is None:
+                        break
+                    W, H = f
+                    target_rows = chat_rows(conv_left)
+                if click_row(match, target_rows, rect, conv_left) is None:
+                    break
+                time.sleep(1.1)
+                f, conv_left, rect = frame()
+                if f is None:
+                    break
+                W, H = f
+                opened = current_group(conv_left, groups)
+                if opened == match:
+                    break
+                log({"stage": "switch-mismatch", "want": match,
+                     "got": opened or header_title(conv_left)[:20],
+                     "attempt": attempt + 1})
+                opened = None
             if opened is None:
-                log({"stage": "skip", "why": "switch not landed",
-                     "title": header_title(conv_left)[:30]})
+                log({"stage": "skip", "why": "switch failed after retry",
+                     "want": match})
                 continue
             handle_open(opened, state, harness, args.session, names, conv_left, W, H)
     finally:

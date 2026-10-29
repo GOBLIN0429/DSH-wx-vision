@@ -116,6 +116,38 @@ def ocr_tokens(path):
         return []
 
 
+def _panel_left(im, W, H):
+    """x of the chat-list / conversation divider, in image pixels.
+
+    Mirrors the bridge's rule: scan a 1/4-scale copy for a near-uniform column
+    whose left and right backgrounds differ, keep the RIGHTMOST such column in
+    the left half, and reject results outside a plausible band. Everything
+    downstream — including where the click lands — depends on this.
+    """
+    scale = 4
+    small = im.resize((max(1, W // scale), max(1, H // scale)))
+    sw, sh = small.size
+    px = small.load()
+    y0, y1 = int(sh * 0.07), int(sh * 0.78)
+    ys = list(range(y0, y1, 4))
+    best = None
+    if ys:
+        for x in range(int(sw * 0.04), int(sw * 0.45)):
+            vals = [sum(px[x, y]) / 3 for y in ys]
+            m = sum(vals) / len(vals)
+            sd = (sum((v - m) ** 2 for v in vals) / len(vals)) ** 0.5
+            if sd >= 3.0:
+                continue
+            lm = sum(sum(px[max(0, x - 2), y]) / 3 for y in ys) / len(ys)
+            rm = sum(sum(px[min(sw - 1, x + 2), y]) / 3 for y in ys) / len(ys)
+            if abs(lm - rm) > 2.5:
+                best = x
+    lo, hi, expect = 0.28, 0.40, 0.357
+    if best is None or not (lo <= best / sw <= hi):
+        return int(W * expect)
+    return best * scale
+
+
 def compose_box(img_path):
     """Locate the compose box.
 
@@ -139,10 +171,14 @@ def compose_box(img_path):
             border = y
             break
 
-    # 2) conversation left edge. Measured across layouts it sits at 0.10-0.12W,
-    # and the click only has to land somewhere inside the box, so a constant
-    # avoids a ~1.4 s full-window OCR on every single send.
-    conv_left = int(W * 0.10)
+    # 2) conversation left edge.
+    #
+    #    This used to be a flat 0.10*W, measured when the chat list was collapsed
+    #    to its icon rail. With the list expanded it occupies roughly 0.36*W, so
+    #    a 0.10*W "compose box" sat INSIDE the chat list — clicking it opened
+    #    whichever conversation was under the cursor (WeChat Team in practice) and
+    #    the bot looked like it was hopping between chats. Detect it instead.
+    conv_left = _panel_left(im, W, H)
 
     if border is None:
         border = int(H * 0.82)
