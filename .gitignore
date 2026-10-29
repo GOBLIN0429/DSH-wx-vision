@@ -1,0 +1,15 @@
+# Build output — regenerate with ./build.sh
+bin/
+.build-cache/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store
+
+# Runtime state (never part of the source tree)
+*.state
+*.log
+state.json
