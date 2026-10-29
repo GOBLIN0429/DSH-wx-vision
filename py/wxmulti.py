@@ -404,6 +404,32 @@ def handle_open(group, state, harness, session_id, names, conv_left, W, H,
          "images": len(paths), "ok": ok})
 
 
+SWITCH_FAIL = {}      # group -> (consecutive failures, cooldown-until timestamp)
+SWITCH_COOLDOWN = 90  # seconds to leave a group alone after repeated failures
+SWITCH_GIVE_UP = 3
+
+
+def switch_blocked(group):
+    fails, until = SWITCH_FAIL.get(group, (0, 0.0))
+    return fails >= SWITCH_GIVE_UP and time.time() < until
+
+
+def note_switch(group, ok):
+    """Remember failed switches so a group that cannot be opened is not retried
+    forever. Without this the watcher re-attempted every list change and the
+    window visibly hopped between chats."""
+    if ok:
+        SWITCH_FAIL.pop(group, None)
+        return
+    fails, _ = SWITCH_FAIL.get(group, (0, 0.0))
+    fails += 1
+    until = time.time() + SWITCH_COOLDOWN if fails >= SWITCH_GIVE_UP else 0.0
+    SWITCH_FAIL[group] = (fails, until)
+    if fails >= SWITCH_GIVE_UP:
+        log({"stage": "switch-cooldown", "group": group, "fails": fails,
+             "seconds": SWITCH_COOLDOWN})
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--groups", default="")
@@ -538,6 +564,9 @@ def main():
             # stale y lands on a neighbour (WeChat Team, typically) and the bot
             # appears to hop around. Verify the title and retry once with fresh
             # coordinates instead of trusting the first click.
+            if switch_blocked(match):
+                log({"stage": "skip", "why": "switch cooling down", "group": match})
+                continue
             opened = None
             for attempt in range(2):
                 if attempt == 0:
@@ -563,9 +592,11 @@ def main():
                      "attempt": attempt + 1})
                 opened = None
             if opened is None:
+                note_switch(match, False)
                 log({"stage": "skip", "why": "switch failed after retry",
                      "want": match})
                 continue
+            note_switch(match, True)
             handle_open(opened, state, harness, args.session, names, conv_left, W, H,
                         opened not in all_chats)
     finally:
