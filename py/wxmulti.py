@@ -171,6 +171,8 @@ def header_title(conv_left):
 
 def read_conversation(conv_left, W, H):
     from PIL import Image
+    if not Path(wxsend.CAP).exists():
+        return []
     x0 = max(0, conv_left - 24)
     Image.open(wxsend.CAP).crop((x0, 0, W, H)).save("/tmp/multi_crop.png")
     raw = wxsend.ocr_tokens(Path("/tmp/multi_crop.png"))
@@ -367,6 +369,10 @@ def main():
         print("[multi] cannot authenticate", flush=True)
         return 1
     print(f"[multi] groups={groups}", flush=True)
+    # Its own capture file: the agent answering a message runs wxsend.py, which
+    # writes /tmp/wx_send.png. Sharing that path made this process open a file
+    # another process had just replaced, crashing the watcher mid-sweep.
+    wxsend.CAP = Path("/tmp/wxmulti_cap.png")
     wb.ensure_geometry()
 
     det = subprocess.Popen([str(BIN / "wxwatch")], stdout=subprocess.PIPE,
